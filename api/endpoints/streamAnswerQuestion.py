@@ -9,6 +9,7 @@
  of the license agreement you entered into with DENODO.
 """
 import os
+import json
 import logging
 import traceback
 
@@ -16,6 +17,7 @@ from pydantic import BaseModel, Field
 from typing import Literal
 
 from fastapi.responses import StreamingResponse
+from fastapi.encoders import jsonable_encoder
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api.utils import ai_tools
@@ -69,7 +71,7 @@ class streamAnswerQuestionRequest(BaseModel):
         description="Number of results to return from the similarity search in the vector store."
     )
     vector_search_sample_data_k: int = Field(
-        default = 3,
+        default = 8,
         description="Number of similar sample data rows to return for the given question."
     )
     vector_search_total_limit: int = Field(
@@ -84,9 +86,12 @@ class streamAnswerQuestionRequest(BaseModel):
         default=1000,
         description="Maximum characters of table descriptions used when filtering how many views to keep. Not applied during vector search or VQL generation (those use full descriptions). Refer to the docs for when this trimming is applied."
     )
-    mode: Literal["default", "data", "metadata"] = Field(default = "default")
+    mode: Literal["default", "data", "metadata"] = Field(default = "data")
     disclaimer: bool = True
-    verbose: bool = True
+    verbose: bool = Field(
+        default=False,
+        description="If true, stream the natural language answer as text/plain. If false, stream the full response, including generated SQL and execution results, as application/json."
+    )
     check_ambiguity: bool = Field(
         default = bool(int(os.getenv('CHECK_AMBIGUITY', '1'))),
         description="If false, skip ambiguity detection."
@@ -102,8 +107,8 @@ class streamAnswerQuestionRequest(BaseModel):
         description="If enabled, the LLM will try to automatically fix the VQL query if the first VQL query generated fails."
     )
     enable_query_reviewer: bool = Field(
-        default=False,
-        description="If enabled, the LLM will review the VQL query if the first VQL query generated returns no rows."
+        default=True,
+        description="If enabled, the LLM will review a generated VQL query that returns no rows, with up to three review attempts after the initial execution."
     )
 
 @router.get(
@@ -125,7 +130,8 @@ async def stream_answer_question_get(
     - Executes the VQL query and gets the data
     - Streams back an answer to the question using the data and the VQL query
 
-    For now, this endpoint only streams back the answer and doesn't return the JSON response like answerQuestion does.
+    With verbose=false, streams the full response as application/json, including the generated SQL and execution result.
+    With verbose=true, streams the natural language answer as text/plain.
 
     This endpoint will also automatically look for the the following values in the environment variables for convenience:
 
@@ -160,7 +166,8 @@ async def stream_answer_question_post(
     - Executes the VQL query and gets the data
     - Streams back an answer to the question using the data and the VQL query
 
-    For now, this endpoint only streams back the answer and doesn't return the JSON response like answerQuestion does.
+    With verbose=false, streams the full response as application/json, including the generated SQL and execution result.
+    With verbose=true, streams the natural language answer as text/plain.
 
     This endpoint will also automatically look for the the following values in the environment variables for convenience:
 
@@ -252,11 +259,15 @@ async def process_stream_question(request_data: streamAnswerQuestionRequest, aut
     ambiguity_message = answer_question.build_ambiguity_message(category_response)
 
     if ambiguity_message:
-        def generator():
-            yield from ambiguity_message
-        return StreamingResponse(generator(), media_type = 'text/plain')
-
-    if category == "SQL":
+        if request_data.verbose:
+            return StreamingResponse(iter([ambiguity_message]), media_type='text/plain')
+        response = answer_question.process_ambiguity_category(
+            ambiguity_message=ambiguity_message,
+            vector_search_tables=vector_search_tables,
+            timings=timings,
+            tokens=sql_category_tokens,
+        )
+    elif category == "SQL":
         response = await process_sql_category(
             request=request_data,
             vector_search_tables=vector_search_tables,
@@ -281,6 +292,10 @@ async def process_stream_question(request_data: streamAnswerQuestionRequest, aut
         )
     else:
         response = answer_question.process_unknown_category(timings=timings)
+
+    if not request_data.verbose:
+        content = json.dumps(jsonable_encoder(response), ensure_ascii=False)
+        return StreamingResponse(iter([content]), media_type='application/json')
 
     def generator():
         yield from response.get('answer', 'Error processing the question.')

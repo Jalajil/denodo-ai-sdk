@@ -1,0 +1,2 @@
+- As a minimalization of the task we have, we should set "mode" to "data" rather than default. "data" makes the LLM always generate VQL. We could set "mode" to "metadata" to see if the LLM knows how to go through the metadata correctly or not.
+- "verbose" better to be false since we use Fusion.

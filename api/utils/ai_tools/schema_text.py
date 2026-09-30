@@ -1,7 +1,7 @@
 from utils.schema_catalog import SchemaCatalog
 from api.utils import sdk_utils
 
-def format_schema_text(vector_search_tables, filtered_tables, sample_data, examples_per_table=3):
+def format_schema_text(vector_search_tables, filtered_tables, sample_data, examples_per_table=8):
     return SchemaCatalog.from_vector_search_tables(vector_search_tables).render_vql_schema(
         filtered_tables=filtered_tables,
         sample_data=sample_data,

@@ -43,8 +43,9 @@ VQL_SCHEMA_GRAMMAR = """# Table: "<database>"."<view>"
 - <column_name> (<type>) [PK] [NOT NULL] [OBLIGATORY] [<extra_key>: <extra_val>] ...
 - <column_name> (<type>) → <logical_name>
 - <column_name> (<type>) → <logical_name>: <description>.
-- <column_name> (<type>) → <logical_name>. sample values: a, b, c
-- <column_name> (<type>) sample values: a, b, c
+- <column_name> (<type>) → <logical_name>. sample values: ["a", "", "c"]
+- <column_name> (<type>) sample values: ["x", null, "z"]
+Sample arrays preserve row order: values at the same array index belong to the same row.
 ## JOINs:
 → <join_clause>. Description: <association_description>
 → <join_clause>
@@ -131,7 +132,7 @@ class SchemaCatalog:
             for view in self.views
         )
 
-    def render_vql_schema(self, filtered_tables=None, sample_data=None, examples_per_table=3):
+    def render_vql_schema(self, filtered_tables=None, sample_data=None, examples_per_table=8):
         filtered_tables = filtered_tables or []
         table_lookup = {view.get_name(): view for view in self.views}
         present_tables = [view.get_name() for view in self.views]
@@ -179,7 +180,7 @@ class SchemaCatalog:
     def render_metadata_prompt_payload(self):
         return self.to_view_jsons()
 
-    def render_related_tables_payload(self, sample_data=None, examples_per_table=3):
+    def render_related_tables_payload(self, sample_data=None, examples_per_table=8):
         present_tables = [view.get_name() for view in self.views]
         return [
             {

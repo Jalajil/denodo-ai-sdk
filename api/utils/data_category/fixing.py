@@ -96,7 +96,7 @@ def _as_fixer_turn(query, error, reasoning, vql):
 async def rewrite_static_issue(
     question, query, issue, llm, vector_search_tables,
     sample_data=None,
-    vector_search_sample_data_k=3,
+    vector_search_sample_data_k=8,
     session_id=None,
 ):
     """Attempt to fix a VQL query where an issue has been detected statically with the dedicated prompt for a known static issue
@@ -139,7 +139,7 @@ def make_fixer_conversation(
     question, query, vector_search_tables,
     query_explanation='',
     sample_data=None,
-    vector_search_sample_data_k=3,
+    vector_search_sample_data_k=8,
     can_use_llm=False,
     seed=None,
 ):
@@ -164,7 +164,7 @@ async def fixer_step(conversation, llm, query, error, session_id=None):
 def make_reviewer_conversation(
     question, query, vector_search_tables,
     sample_data=None,
-    vector_search_sample_data_k=3,
+    vector_search_sample_data_k=8,
     can_use_llm=False,
 ):
     schema = _schema_text(query, vector_search_tables, sample_data, vector_search_sample_data_k)

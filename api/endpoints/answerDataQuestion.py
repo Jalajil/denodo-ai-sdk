@@ -71,7 +71,7 @@ class answerDataQuestionRequest(BaseModel):
         description="Number of results to return from the similarity search in the vector store."
     )
     vector_search_sample_data_k: int = Field(
-        default = 3,
+        default = 8,
         description="Number of similar sample data rows to return for the given question."
     )
     vector_search_total_limit: int = Field(
@@ -88,7 +88,7 @@ class answerDataQuestionRequest(BaseModel):
     )
     disclaimer: bool = True
     verbose: bool = Field(
-        default = True,
+        default = False,
         description="If true, the LLM will receive the execution result from the generated SQL and return a natural language response in the answer key. If set to false, it will return the execution result and the generated SQL query. Setting to false is the recommended option when using the endpoint as a tool."
     )
     check_ambiguity: bool = Field(
@@ -106,8 +106,8 @@ class answerDataQuestionRequest(BaseModel):
         description="If enabled, the LLM will try to automatically fix the VQL query if the first VQL query generated fails."
     )
     enable_query_reviewer: bool = Field(
-        default=False,
-        description="If enabled, the LLM will review the VQL query if the first VQL query generated returns no rows."
+        default=True,
+        description="If enabled, the LLM will review a generated VQL query that returns no rows, with up to three review attempts after the initial execution."
     )
 
 class answerDataQuestionResponse(BaseModel):

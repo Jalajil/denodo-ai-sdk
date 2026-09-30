@@ -1,0 +1,5 @@
+- How much tokens do docs that are injected to the LLM generate?
+- How good the embedding model returns the vector_search_k=5?
+- We need to check if the vector store has how many VDP databases, and if it has more than 1 then we need to check how many databases assigned in "vdp_database_names". 
+- I need to check if VQL is written correctly or not.
+- Let's see what `query_explanation` returns for each query.

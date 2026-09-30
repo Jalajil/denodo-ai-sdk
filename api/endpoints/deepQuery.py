@@ -80,7 +80,7 @@ class deepQueryRequest(BaseModel):
         description="Number of results to return from the similarity search in the vector store."
     )
     vector_search_sample_data_k: int = Field(
-        default = 3,
+        default = 8,
         description="Number of similar sample data rows to return for the given question."
     )
 

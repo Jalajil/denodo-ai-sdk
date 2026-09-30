@@ -30,7 +30,7 @@ def stream_answer_question(question):
     for chunk in response.iter_lines(decode_unicode = True):
         print(chunk, end='', flush=True)
 
-def answer_question(question, mode="default"):
+def answer_question(question, mode="data"):
     """Get the answer to a question from the LLM."""
     request_params = {'question': question, "mode": mode}
     response = requests.get(f'{API_HOST}/answerQuestion', params=request_params, auth = (DATA_MARKETPLACE_USER, DATA_MARKETPLACE_PWD))

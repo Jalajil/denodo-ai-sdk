@@ -1,0 +1,1 @@
+- Increase the `vector_search_sample_data_k` from 3 to 6. And preserve the row relationships, and empty values can remain as placeholders without breaking that relationship. So the agent gets more context and more near query samples.

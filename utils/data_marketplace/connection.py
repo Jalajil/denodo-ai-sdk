@@ -41,7 +41,7 @@ async def get_views_metadata_documents(
     auth,
     tag_name=None,
     database_name=None,
-    examples_per_table=3,
+    examples_per_table=8,
     table_associations=True,
     table_descriptions=True,
     table_column_descriptions=True,

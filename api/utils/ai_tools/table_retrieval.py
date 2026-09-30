@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 
 from utils import utils
@@ -17,7 +18,7 @@ async def get_relevant_tables(
     vector_search_k=5,
     use_views="",
     expand_set_views=True,
-    vector_search_sample_data_k=3,
+    vector_search_sample_data_k=8,
     allow_external_associations=True,
     vector_search_total_limit=20,
     custom_headers=None,
@@ -54,6 +55,7 @@ async def get_relevant_tables(
     # Main search in the vector store
     search_params = {
         "vector": embedded_query,
+        "query": query,
         "k": vector_search_k,
         "database_names": vdb_list,
         "tag_names": tag_list,
@@ -122,6 +124,7 @@ async def get_relevant_tables(
         vector_search_sample_data_k,
         security_policies_by_view,
         timings,
+        query=query,
     )
 
     # Generate error message if applicable
@@ -276,6 +279,28 @@ def _get_and_append_associations(
             valid_view_ids=valid_view_ids,
         )
 
+def _read_sample_row(document):
+    """Prefer JSON; only read legacy comma rows when their column count matches."""
+    raw_columns = document.metadata.get('columns', '')
+    try:
+        columns = json.loads(raw_columns)
+    except (ValueError, TypeError):
+        columns = [name.strip() for name in raw_columns.split(',')] if isinstance(raw_columns, str) else []
+    if not isinstance(columns, list) or not columns or not all(isinstance(col, str) and col for col in columns):
+        raise ValueError('Invalid sample column names')
+
+    if 'row_json' in document.metadata:
+        values = json.loads(document.metadata['row_json'])
+        if not isinstance(values, dict):
+            raise ValueError('Sample row JSON must be an object')
+        return {col: values.get(col, '') for col in columns}
+
+    values = document.page_content.split(',')
+    if len(values) != len(columns):
+        raise ValueError('Legacy sample row has an ambiguous column count')
+    return dict(zip(columns, values))
+
+
 def _fetch_sample_data(
     relevant_tables,
     sample_data_vector_store,
@@ -283,6 +308,7 @@ def _fetch_sample_data(
     vector_search_sample_data_k,
     security_policies_by_view,
     timings,
+    query=None,
 ):
     """Dynamically fetches sample data for each view, applying security restrictions."""
     sample_data = {}
@@ -296,17 +322,24 @@ def _fetch_sample_data(
                 continue
 
             result = sample_data_vector_store.search_by_vector(
-                vector=embedded_query, k=vector_search_sample_data_k, view_ids=[view_id]
+                vector=embedded_query, k=vector_search_sample_data_k, view_ids=[view_id], query_text=query
             )
 
             if result and len(result) > 0:
-                column_names = [col.strip() for col in result[0].metadata["columns"].split(",") if col.strip()]
-                column_samples = {col: [] for col in column_names}
-
-                for row in result:
-                    values = [value.strip() for value in row.page_content.strip().split(",")]
-                    for col, val in zip(column_names, values):
-                        column_samples[col].append(val)
+                rows = []
+                column_names = {}
+                for document in result:
+                    try:
+                        row = _read_sample_row(document)
+                    except (ValueError, TypeError):
+                        logging.warning('Skipping invalid sample row for view %s; synchronize its metadata again.', view_id)
+                        continue
+                    rows.append(row)
+                    column_names.update(dict.fromkeys(row))
+                if not rows:
+                    continue
+                # Append one value per accepted row, including missing or empty cells.
+                column_samples = {col: [row.get(col, '') for row in rows] for col in column_names}
 
                 restricted_cols = security_info.get("restrictedColumns", [])
                 if restricted_cols:

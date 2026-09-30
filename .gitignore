@@ -13,7 +13,6 @@ uploads/
 skills/*
 !skills/deepquery/
 !skills/deepquery/**
-tests/
 logs/
 venv/
 google_service_account.json

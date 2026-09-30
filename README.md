@@ -115,5 +115,49 @@ Where Bedrock refers to AWS Bedrock, NVIDIA refers to NVIDIA NIM and Google refe
 
 Where Bedrock refers to AWS Bedrock, NVIDIA refers to NVIDIA NIM and Google refers to Google Vertex AI.
 
+## Data question defaults and sampled rows
+
+Question endpoints default to `mode="data"` where selectable, `verbose=false`,
+`enable_query_reviewer=true`, and `vector_search_sample_data_k=8`. After an initial
+query returns no rows, the Query Reviewer can make up to three review attempts.
+It stops early when a query succeeds or the reviewer keeps the current query.
+The Query Fixer retains its two-attempt limit. Requests can override the defaults.
+With `verbose=false`, the streaming endpoints return the structured result as
+`application/json`; `verbose=true` retains the `text/plain` answer stream.
+
+Each sampled row is stored as a JSON object in `row_json`, with JSON column names
+in `columns`. The embedding text pairs column labels with their values. Retrieval
+reads the JSON row, and prompts show aligned JSON arrays: values at the same array
+index belong to the same sampled row. Empty strings, nulls, zero, and false retain
+their positions. Missing cells use an empty string placeholder. Row restrictions
+skip sample retrieval, and restricted columns are removed before prompt rendering.
+
+After upgrading, run `/getMetadata` for the relevant databases or tags with
+`insert=true` and `incremental=false` to rebuild stored samples and embeddings.
+Old comma-separated rows remain readable when their column count matches, but
+ambiguous or malformed rows are skipped. Re-synchronization is required to recover
+values whose commas were ambiguous in the old format.
+
+## Qdrant configuration
+
+The SDK configuration template selects `VECTOR_STORE=Qdrant`. Configure
+`api/utils/sdk_config.env` with `QDRANT_URL` and, if needed, `QDRANT_API_KEY`.
+For an embedded instance use `QDRANT_PATH`; `QDRANT_LOCATION=:memory:` is for tests.
+The SDK uses the `ai_sdk_vector_store` and `ai_sdk_sample_data` collections.
+Hybrid retrieval is enabled by default, combining dense embeddings with BM25.
+Set `QDRANT_HYBRID=0` for dense retrieval only. Additional options are documented
+in `api/utils/sdk_config.env.example`.
+Enabling hybrid on an existing dense collection requires [Qdrant server 1.18+](https://qdrant.tech/documentation/manage-data/collections/#update-vector-schema)
+and a full metadata synchronization to populate its new sparse vectors.
+
+Set `LLM_PROVIDER`, `LLM_MODEL`, `THINKING_LLM_PROVIDER`, `THINKING_LLM_MODEL`,
+`EMBEDDINGS_PROVIDER`, and `EMBEDDINGS_MODEL` to your deployed services.
+The Query Reviewer and Query Fixer use the request's general LLM. Assigning
+different models to individual jobs is a separate configuration change.
+
+Run the regression suite with `python -m pytest tests -q` after installing the
+project requirements and `pytest`. The tests use in-memory Qdrant and test
+embeddings; the BM25 test uses locally cached model files and skips if unavailable.
+
 # Licensing
 Please see the file called LICENSE.

@@ -120,6 +120,14 @@ class UniformVectorStore:
                     index_name=self.index_name,
                     engine="faiss"
                 )
+        elif self.provider == "qdrant":
+            from utils.qdrant_store import QdrantStore
+
+            self.client = QdrantStore(
+                collection_name=self.index_name,
+                embeddings=self.embeddings,
+                dimensions=self.dimensions,
+            )
         elif self.provider == "oracle":
             import oracledb
             from langchain_oracledb.vectorstores import OracleVS
@@ -149,6 +157,11 @@ class UniformVectorStore:
             )
         else:
             raise ValueError(f"Unsupported vector store provider: {self.provider}")
+
+    @property
+    def higher_score_is_better(self):
+        """Whether this provider's score is a similarity rather than a distance."""
+        return self.provider in ("opensearch", "qdrant")
 
     def get_last_update_dict(self):
         search_vector = self.search_by_vector(self.search_vector, k = 1, view_ids = ["last_update"])
@@ -321,17 +334,17 @@ class UniformVectorStore:
         if scores:
             if self.provider == "opensearch":
                 return self.client.similarity_search_with_score(query, k=k, search_type="script_scoring", pre_filter=search_filter)
-            elif self.provider in ["chroma", "pgvector", "oracle"]:
+            elif self.provider in ["chroma", "pgvector", "oracle", "qdrant"]:
                 return self.client.similarity_search_with_score(query, k=k, filter=search_filter)
         else:
             if self.provider == "opensearch":
                 return self.client.similarity_search(query, k=k, search_type="script_scoring", pre_filter=search_filter)
-            elif self.provider in ["chroma", "pgvector", "oracle"]:
+            elif self.provider in ["chroma", "pgvector", "oracle", "qdrant"]:
                 return self.client.similarity_search(query, k=k, filter=search_filter)
 
     @log_params
     @timed
-    def search_by_vector(self, vector, k=3, view_ids=None, database_names=None, tag_names=None, view_names=None, scores=False):
+    def search_by_vector(self, vector, k=3, view_ids=None, database_names=None, tag_names=None, view_names=None, scores=False, query_text=None):
         # If view_ids is provided and it's empty, return empty list
         if view_ids is not None and len(view_ids) == 0:
             return []
@@ -346,6 +359,10 @@ class UniformVectorStore:
         if scores:
             if self.provider == "opensearch":
                 return self.client.similarity_search_with_score_by_vector(vector, k=k, search_type="script_scoring", pre_filter=search_filter)
+            elif self.provider == "qdrant":
+                # query_text is what lets the sparse half of the hybrid query run;
+                # without it Qdrant falls back to dense-only, same as the others.
+                return self.client.similarity_search_with_score_by_vector(vector, k=k, filter=search_filter, query_text=query_text)
             elif self.provider in ["pgvector", "oracle"]:
                 return self.client.similarity_search_with_score_by_vector(vector, k=k, filter=search_filter)
             elif self.provider == "chroma":
@@ -353,6 +370,8 @@ class UniformVectorStore:
         else:
             if self.provider == "opensearch":
                 return self.client.similarity_search_by_vector(vector, k=k, search_type="script_scoring", pre_filter=search_filter)
+            elif self.provider == "qdrant":
+                return self.client.similarity_search_by_vector(vector, k=k, filter=search_filter, query_text=query_text)
             elif self.provider in ["chroma", "pgvector", "oracle"]:
                 return self.client.similarity_search_by_vector(vector, k=k, filter=search_filter)
 
@@ -362,6 +381,10 @@ class UniformVectorStore:
         Builds a search filter for metadata-only queries (database_names, tag_names)
         using OR logic across the provided lists.
         """
+        if self.provider == "qdrant":
+            from utils.qdrant_store import build_filter
+            return build_filter(database_names=database_names, tag_names=tag_names)
+
         or_conditions = []
 
         if database_names:
@@ -394,6 +417,9 @@ class UniformVectorStore:
 
     @log_params
     def _build_get_view_ids_search_filter(self, view_names):
+        if self.provider == "qdrant":
+            from utils.qdrant_store import build_filter
+            return build_filter(view_names=view_names)
         if self.provider == "opensearch":
             #return {"metadata.view_name": {"$in": view_names}}
             return {"terms": {
@@ -406,6 +432,11 @@ class UniformVectorStore:
 
     @log_params
     def _build_search_filter(self, view_ids, database_names=None, tag_names=None, view_names=None):
+        if self.provider == "qdrant":
+            from utils.qdrant_store import build_filter
+            return build_filter(view_ids=view_ids, database_names=database_names,
+                                tag_names=tag_names, view_names=view_names)
+
         # Check if any additional filters are provided
         has_additional_filters = database_names or tag_names or view_names
 
@@ -768,11 +799,18 @@ class UniformVectorStore:
         if vector is not None:
             search_method = self.search_by_vector
             search_arg = vector
+            # Carry the raw question alongside the vector: Qdrant uses it for the
+            # sparse half of a hybrid query, and every other provider ignores it.
+            if query is not None and self.provider == "qdrant":
+                kwargs.setdefault("query_text", query)
         else:
             search_method = self.search
             search_arg = query
 
-        if not view_ids or total_ids <= BATCH_SIZE:
+        # Qdrant has no Postgres parameter limit. Its hybrid RRF scores depend
+        # on ranks within the whole candidate set, so separate batches cannot
+        # be merged by comparing their independently fused scores.
+        if self.provider == "qdrant" or not view_ids or total_ids <= BATCH_SIZE:
             return search_method(search_arg, k=k, view_ids=view_ids, scores=scores, **kwargs)
 
         all_candidates = []
@@ -781,10 +819,12 @@ class UniformVectorStore:
             batch_results = search_method(search_arg, k=k, view_ids=batch_ids, scores=True, **kwargs)
             all_candidates.extend(batch_results)
 
-        # Sort by score (distance ascending for most VectorStores)
-        # Check if results are tuples (doc, score)
+        # Merge the per-batch rankings. Chroma, PGVector and Oracle return a
+        # distance (lower is better); OpenSearch returns _score and Qdrant a
+        # similarity or fused rank (higher is better). Sorting one as the other
+        # silently returns the worst matches instead of the best.
         if all_candidates and isinstance(all_candidates[0], tuple):
-            all_candidates.sort(key=lambda x: x[1])
+            all_candidates.sort(key=lambda x: x[1], reverse=self.higher_score_is_better)
 
         top_k = all_candidates[:k]
 

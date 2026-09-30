@@ -95,7 +95,6 @@ async def resolve_query(
     or the limit of fix/review attempts is reached. Returns a ResolvedQuery."""
 
     limit = request.vql_execute_rows_limit
-    max_attempts = 2
     k = request.vector_search_sample_data_k
 
     log = ExplanationLog(gen.explanation)
@@ -123,8 +122,8 @@ async def resolve_query(
 
     original_vql = vql_query
 
-    # The VQL query is now executed. If it returns empty, it goes through the query reviewer for max_attempts attempts.
-    # If it returns an error, it goes through the query fixer for max_attempts attempts.
+    # Execute the initial query before counting retries. Empty results allow up to
+    # three query reviewer attempts; errors keep the existing two query fixer attempts.
     outcome = await _execute(vql_query, auth, limit, timings, custom_headers)
 
     attempts = 0
@@ -169,6 +168,7 @@ async def resolve_query(
                 reasoning="Rewrote the query to remove the LIMIT/OFFSET in subquery using ROW_NUMBER().",
             )
 
+    max_attempts = 3 if flow == "review" else 2
     while attempts < max_attempts and (
             (flow == "fix" and outcome.needs_fix) or
             (flow == "review" and not outcome.is_success)

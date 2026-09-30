@@ -45,7 +45,7 @@ async def query_to_vql(
     custom_instructions='',
     session_id=None,
     sample_data=None,
-    vector_search_sample_data_k=3,
+    vector_search_sample_data_k=8,
     can_use_llm=False
 ):
     prompt = PromptTemplate.from_template(QUERY_TO_VQL_PROMPT)
